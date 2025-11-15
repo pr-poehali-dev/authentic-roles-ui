@@ -4,6 +4,8 @@ import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
 import Icon from '@/components/ui/icon';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const questions = [
   "Вы легко находите общий язык с новыми людьми",
@@ -52,22 +54,20 @@ const questions = [
 
 type Stage = 'welcome' | 'test' | 'results';
 
-interface RoleResult {
-  role: string;
-  score: number;
-  description: string;
-  color: string;
+interface AuthenticRole {
+  name: string;
+  percentage: number;
 }
 
-interface CompetenceItem {
-  competence: string;
-  score: number;
+interface Competency {
+  name: string;
+  percentage: number;
 }
 
 interface TestResults {
-  top_roles: RoleResult[];
-  top_10_competences: CompetenceItem[];
-  bottom_10_competences: CompetenceItem[];
+  authentic_roles: AuthenticRole[];
+  top_10_competencies: Competency[];
+  bottom_10_competencies: Competency[];
   recommendations: string[];
 }
 
@@ -109,18 +109,122 @@ const Index = () => {
         body: JSON.stringify({ answers }),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
       setResults(data);
       setStage('results');
     } catch (error) {
       console.error('Ошибка при отправке теста:', error);
+      alert('Произошла ошибка при обработке результатов. Попробуйте еще раз.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const downloadPDF = () => {
-    console.log('Скачивание PDF...');
+    if (!results) return;
+
+    const doc = new jsPDF();
+    const currentDate = new Date().toLocaleDateString('ru-RU');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.text('Аутентичные роли', 105, 20, { align: 'center' });
+    
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Дата теста: ${currentDate}`, 105, 30, { align: 'center' });
+
+    let yPos = 45;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Основные аутентичные роли', 14, yPos);
+    yPos += 10;
+
+    const rolesData = results.authentic_roles.slice(0, 3).map(role => [
+      role.name,
+      `${role.percentage}%`
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Роль', 'Процент']],
+      body: rolesData,
+      theme: 'grid',
+      headStyles: { fillColor: [255, 107, 107] },
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 15;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('ТОП-10 компетенций', 14, yPos);
+    yPos += 10;
+
+    const topCompData = results.top_10_competencies.map(comp => [
+      comp.name,
+      `${comp.percentage}%`
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Компетенция', 'Процент']],
+      body: topCompData,
+      theme: 'grid',
+      headStyles: { fillColor: [52, 211, 153] },
+    });
+
+    doc.addPage();
+    yPos = 20;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Зоны роста (ДНО-10)', 14, yPos);
+    yPos += 10;
+
+    const bottomCompData = results.bottom_10_competencies.map(comp => [
+      comp.name,
+      `${comp.percentage}%`
+    ]);
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Компетенция', 'Процент']],
+      body: bottomCompData,
+      theme: 'grid',
+      headStyles: { fillColor: [255, 107, 107] },
+    });
+
+    yPos = (doc as any).lastAutoTable.finalY + 15;
+
+    if (yPos > 250) {
+      doc.addPage();
+      yPos = 20;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Рекомендации', 14, yPos);
+    yPos += 10;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    
+    results.recommendations.forEach((rec, idx) => {
+      if (yPos > 270) {
+        doc.addPage();
+        yPos = 20;
+      }
+      const lines = doc.splitTextToSize(`${idx + 1}. ${rec}`, 180);
+      doc.text(lines, 14, yPos);
+      yPos += lines.length * 7 + 3;
+    });
+
+    doc.save(`Аутентичные_роли_${currentDate.replace(/\./g, '_')}.pdf`);
   };
 
   const progress = ((currentQuestion + 1) / questions.length) * 100;
@@ -257,24 +361,26 @@ const Index = () => {
           </Card>
 
           <div className="grid md:grid-cols-3 gap-6">
-            {results.top_roles.map((role, idx) => (
+            {results.authentic_roles.slice(0, 3).map((role, idx) => (
               <Card 
                 key={idx} 
                 className="p-6 shadow-xl border-0 hover:scale-105 transition-transform bg-white/80 backdrop-blur"
-                style={{
-                  borderTop: `4px solid ${role.color}`
-                }}
               >
                 <div className="space-y-4">
-                  <div className="flex items-start justify-between">
-                    <h3 className="text-xl font-semibold text-foreground">{role.role}</h3>
-                    <span className="text-2xl font-bold" style={{ color: role.color }}>
-                      {role.score}
-                    </span>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-semibold text-foreground">{role.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-3xl font-bold text-primary">
+                        {role.percentage}%
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {role.description}
-                  </p>
+                  <div className="w-full bg-muted rounded-full h-3">
+                    <div 
+                      className="bg-primary h-3 rounded-full transition-all duration-500"
+                      style={{ width: `${role.percentage}%` }}
+                    />
+                  </div>
                 </div>
               </Card>
             ))}
@@ -288,10 +394,10 @@ const Index = () => {
                   <h2 className="text-2xl font-semibold">ТОП-10 компетенций</h2>
                 </div>
                 <div className="space-y-2">
-                  {results.top_10_competences.map((comp, idx) => (
+                  {results.top_10_competencies.map((comp, idx) => (
                     <div key={idx} className="flex justify-between items-center p-3 rounded-lg bg-accent/5 hover:bg-accent/10 transition-colors">
-                      <span className="text-sm font-medium">{comp.competence}</span>
-                      <span className="font-bold text-accent">{comp.score}</span>
+                      <span className="text-sm font-medium">{comp.name}</span>
+                      <span className="font-bold text-accent">{comp.percentage}%</span>
                     </div>
                   ))}
                 </div>
@@ -302,13 +408,13 @@ const Index = () => {
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <Icon name="TrendingDown" size={24} className="text-primary" />
-                  <h2 className="text-2xl font-semibold">Зоны роста</h2>
+                  <h2 className="text-2xl font-semibold">Зоны роста (ДНО-10)</h2>
                 </div>
                 <div className="space-y-2">
-                  {results.bottom_10_competences.map((comp, idx) => (
+                  {results.bottom_10_competencies.map((comp, idx) => (
                     <div key={idx} className="flex justify-between items-center p-3 rounded-lg bg-primary/5 hover:bg-primary/10 transition-colors">
-                      <span className="text-sm font-medium">{comp.competence}</span>
-                      <span className="font-bold text-primary">{comp.score}</span>
+                      <span className="text-sm font-medium">{comp.name}</span>
+                      <span className="font-bold text-primary">{comp.percentage}%</span>
                     </div>
                   ))}
                 </div>
